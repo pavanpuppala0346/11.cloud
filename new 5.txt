@@ -1,0 +1,29 @@
+SELECT
+    q.domain,
+    q.subdomain,
+    CASE
+      WHEN gt.overall_score IS NOT NULL THEN
+        CASE 
+          WHEN gt.overall_score > 1 THEN gt.overall_score/100.0
+          ELSE gt.overall_score::numeric
+        END
+      WHEN gc.evaluation_scores->>'overall_score' IS NOT NULL THEN
+        CASE
+          WHEN (gc.evaluation_scores->>'overall_score')::numeric > 1 
+          THEN (gc.evaluation_scores->>'overall_score')::numeric / 100.0
+          ELSE (gc.evaluation_scores->>'overall_score')::numeric
+        END
+      ELSE NULL
+    END AS fs_norm
+FROM questions q
+LEFT JOIN ground_truth gt 
+ON q.id = gt.question_id
+LEFT JOIN generated_content gc
+ON q.session_id = gc.session_id
+	
+SELECT *
+FROM questions q
+LEFT JOIN ground_truth gt 
+ON q.id = gt.question_id
+LEFT JOIN generated_content gc
+ON q.session_id = gc.session_id

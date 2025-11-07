@@ -1,0 +1,61 @@
+WITH joined AS (
+		  SELECT
+			q.domain,
+			--q.subdomain,
+			CASE
+			  WHEN gt.overall_score IS NOT NULL THEN
+				CASE 
+				  WHEN gt.overall_score > 1 THEN gt.overall_score/100.0
+				  ELSE gt.overall_score::numeric
+				END
+			  WHEN gc.evaluation_scores->>'overall_score' IS NOT NULL THEN
+				CASE
+				  WHEN (gc.evaluation_scores->>'overall_score')::numeric > 1 
+				  THEN (gc.evaluation_scores->>'overall_score')::numeric / 100.0
+				  ELSE (gc.evaluation_scores->>'overall_score')::numeric
+				END
+			  ELSE NULL
+			END AS fs_norm
+		FROM questions q
+		LEFT JOIN ground_truth gt 
+		ON q.id = gt.question_id
+		LEFT JOIN generated_content gc
+		ON q.session_id = gc.session_id
+),
+bucketed AS (
+  SELECT
+    domain,
+    --subdomain,
+    CASE
+      WHEN fs_norm >= 0.8 AND fs_norm <= 1.0 THEN 'Very Good'
+      WHEN fs_norm >= 0.6 AND fs_norm <  0.8 THEN 'Good'
+      WHEN fs_norm >= 0.5 AND fs_norm <  0.6 THEN 'Average'
+      WHEN fs_norm >= 0.3 AND fs_norm <  0.5 THEN 'Poor'
+      WHEN fs_norm >= 0.0 AND fs_norm <  0.3 THEN 'Very Poor'
+      ELSE 'Unknown'
+    END AS bucket
+  FROM joined
+  WHERE fs_norm IS NOT NULL
+),
+agg AS (
+  SELECT
+    domain,
+    --subdomain,
+    COUNT(*) FILTER (WHERE bucket = 'Very Good') AS "Very Good",
+    COUNT(*) FILTER (WHERE bucket = 'Good')      AS "Good",
+    COUNT(*) FILTER (WHERE bucket = 'Average')   AS "Average",
+    COUNT(*) FILTER (WHERE bucket = 'Poor')      AS "Poor",
+    COUNT(*) FILTER (WHERE bucket = 'Very Poor') AS "Very Poor"
+  FROM bucketed
+  GROUP BY domain--, subdomain
+)
+SELECT
+  domain,
+  --subdomain,
+  COALESCE("Very Good", 0) AS "Very Good",
+  COALESCE("Good", 0)      AS "Good",
+  COALESCE("Average", 0)   AS "Average",
+  COALESCE("Poor", 0)      AS "Poor",
+  COALESCE("Very Poor", 0) AS "Very Poor"
+FROM agg
+ORDER BY domain--, subdomain;

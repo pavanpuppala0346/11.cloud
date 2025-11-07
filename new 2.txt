@@ -1,0 +1,50 @@
+Select score_category, count from (SELECT
+  CASE
+    WHEN final_score BETWEEN 0.8 AND 1.0 THEN 'Very Good'
+    WHEN final_score BETWEEN 0.6 AND 0.79 THEN 'Good'
+    WHEN final_score BETWEEN 0.5 AND 0.59 THEN 'Average'
+    WHEN final_score BETWEEN 0.3 AND 0.49 THEN 'Poor'
+    WHEN final_score BETWEEN 0.0 AND 0.29 THEN 'Very Poor'
+    ELSE 'Unknown'
+  END AS score_category,
+  COUNT(*) AS count,
+  CASE
+    WHEN final_score BETWEEN 0.8 AND 1.0 THEN 1
+    WHEN final_score BETWEEN 0.6 AND 0.79 THEN 2
+    WHEN final_score BETWEEN 0.5 AND 0.59 THEN 3
+    WHEN final_score BETWEEN 0.3 AND 0.49 THEN 4
+    WHEN final_score BETWEEN 0.0 AND 0.29 THEN 5
+    ELSE 6
+  END AS sort_order
+FROM evaluation_result_task e
+INNER JOIN public.task_details_raw_data t 
+  ON e.sys_id = t.sys_id
+WHERE t.table_name IN (${category:singlequote})
+GROUP BY score_category, sort_order
+ORDER BY sort_order)
+
+WITH joined AS (
+    SELECT 
+        q.domain,
+        q.subdomain,
+        q.question_type,
+        COALESCE(
+            gt.overall_score,
+            (gt.relevancy_rating + gt.accuracy_rating + gt.completeness_rating)/ 3.0
+        ) AS final_score
+    FROM questions q
+    JOIN ground_truth gt 
+      ON gt.question_id = q.id   -- adjust join if needed
+)
+SELECT 
+    CASE 
+        WHEN final_score < 1 THEN '0-1'
+        WHEN final_score < 2 THEN '1-2'
+        WHEN final_score < 3 THEN '2-3'
+        WHEN final_score < 4 THEN '3-4'
+        ELSE '4-5'
+    END AS score_range,
+    COUNT(*) AS total
+FROM joined
+GROUP BY score_range
+ORDER BY score_range;

@@ -1,0 +1,90 @@
+WITH categories(table_name) AS (
+  SELECT unnest(ARRAY['incident','sn_customerservice_case','sn_hr_core_case'])
+),
+joined AS (
+  SELECT
+    t.table_name,
+    CASE
+      WHEN e.final_score IS NULL THEN NULL::numeric
+      WHEN e.final_score > 1    THEN e.final_score/100.0
+      ELSE e.final_score::numeric
+    END AS fs_norm
+  FROM public.task_details_raw_data t
+  JOIN public.evaluation_result_task e ON t.sys_id = e.sys_id
+WHERE t.table_name IN (${category:singlequote})
+),
+bucketed AS (
+  SELECT
+    table_name,
+    CASE
+      WHEN fs_norm >= 0.8 AND fs_norm <= 1.0 THEN 'Very Good'
+      WHEN fs_norm >= 0.6 AND fs_norm <  0.8 THEN 'Good'
+      WHEN fs_norm >= 0.5 AND fs_norm <  0.6 THEN 'Average'
+      WHEN fs_norm >= 0.3 AND fs_norm <  0.5 THEN 'Poor'        
+      WHEN fs_norm >= 0.0 AND fs_norm <  0.3 THEN 'Very Poor'   
+      ELSE 'Unknown'
+    END AS bucket
+  FROM joined
+),
+agg AS (
+  SELECT
+    table_name,
+    COUNT(*) FILTER (WHERE bucket = 'Very Good') AS "Very Good",
+    COUNT(*) FILTER (WHERE bucket = 'Good')      AS "Good",
+    COUNT(*) FILTER (WHERE bucket = 'Average')   AS "Average",
+    COUNT(*) FILTER (WHERE bucket = 'Poor')      AS "Poor",
+    COUNT(*) FILTER (WHERE bucket = 'Very Poor') AS "Very Poor"
+  FROM bucketed
+  GROUP BY table_name
+)
+SELECT
+  c.table_name AS category,
+  COALESCE(a."Very Good", 0) AS "Very Good",
+  COALESCE(a."Good", 0)      AS "Good",
+  COALESCE(a."Average", 0)   AS "Average",
+  COALESCE(a."Poor", 0)      AS "Poor",
+  COALESCE(a."Very Poor", 0) AS "Very Poor"
+FROM categories c
+LEFT JOIN agg a USING (table_name)
+ORDER BY CASE c.table_name
+  WHEN 'incident' THEN 1
+  WHEN 'sn_customerservice_case' THEN 2
+  WHEN 'sn_hr_core_case' THEN 3
+  ELSE 999
+END;
+
+
+
+
+WITH bucketed AS (
+  SELECT
+    gc.category,
+    CASE
+      WHEN er.final_score >= 0.80 THEN 'Very Good'
+      WHEN er.final_score >= 0.60 AND er.final_score < 0.80 THEN 'Good'
+      WHEN er.final_score >= 0.50 AND er.final_score < 0.60 THEN 'Average'
+      WHEN er.final_score >= 0.30 AND er.final_score < 0.50 THEN 'Poor'
+      WHEN er.final_score IS NULL OR er.final_score < 0.30 THEN 'Very Poor'
+      ELSE 'Unknown'
+    END AS score_category
+  FROM questions q
+  JOIN generated_content gc
+    ON q.session_id = gc.sessionid
+  JOIN evaluation_results er
+    ON q.session_id = er.question_id
+)
+SELECT
+  category,
+  score_category,
+  COUNT(*) AS count
+FROM bucketed
+GROUP BY category, score_category
+ORDER BY category, 
+  CASE score_category
+    WHEN 'Very Good' THEN 1
+    WHEN 'Good' THEN 2
+    WHEN 'Average' THEN 3
+    WHEN 'Poor' THEN 4
+    WHEN 'Very Poor' THEN 5
+    ELSE 6
+  END;

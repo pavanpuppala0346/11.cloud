@@ -1,0 +1,147 @@
+1. questions
+(session id : uuid, source_document : character, question_type : character, domain : character, subdomain : character, question: text, metadata : jsonb, created_at :timestamp, objective : text, pushed_to_service_now_on : timestamp)
+question_type column values like multi_hop, atomic, inter_community, relational
+domain column values like 116 values
+sub_domain column values like 261 values
+
+2. Generated_content
+(ID : Integer, Content_Type :  Character, Category:Character, Subdomain:Character, Content_Data:Text, Config: JsonB, Evaluation_Scores:JsonB, Metadata:JsonB, Iterations_Count: Integer, Quality_Threshold_Met : Boolean, CreatedAt: Timestamp, SessionID: Character, FileName: Character, Push_To_Service_Now_On:Timestamp)
+Category = (Admin, HR, ITSM, admin, hr, itsm)
+Iterations_count column values like 1,2,3
+
+3. evaluation_results
+(ID : UUID, question_id:uuid, component_scores:jsonb, weights_used:jsonb, human_feedback_available:Boolean, human_feedback_content:jsonb, evaluation_timestamp: timestamp, final_score :double, model_id:character, domain_type:character, response_text:text, ground_truth_text:text)
+component_scores contain json data we need to normalize the json data {"A": 0.51, "B": 0.273713299892261, "C": 0.95}
+weights_used contain json data we need to normalize the json data {"A": 0.3333333333333333, "B": 0.3333333333333333, "C": 0.3333333333333333}
+human_feedback_content contain json data we need to normalize the json data {"comment": "comment for  9905a16d-bd86-4770-a3cd-889bf3b6c538", "thumbfeedback": "down"}
+
+
+3. Ground_truth
+(ID : UUID, SessionID:Character, QuestionID:UUID, Response:Text, Is_Complete:Boolean, Cost:Numeric, Prompt_Tokens:Integer, Completion_Tokens:Integer, Response_Time_Seconds:Double, Overall_Score:Double, Relevancy_Rating:Integer, Relevancy_Justification : Text, Accuracy_Rating: Integer, Accuracy_Justification :Text, Completeness_Rating: Integer, Completeness_Justification:Text,  created_at: timestamp)
+
+Relevancy_rating column values like 5
+Accuracy_rating column values like 5
+Completeness_rating column values like 4,5
+
+4. Snow_bot_responses
+(ID :UUID, Session_ID:Character, Question_ID:UUID, Response:Text, Created_At:TimeStamp)
+
+5.Uploaded_files
+(File_ID: Character, Session_ID:Character, File_Name:Character, File_URL:Text, File_new_Name: Character, Uploaded_Date_Time: Timestamp, Main_Domain : Character, Subdomain:Character)
+Main_domain column values like admin, hr, itsm
+
+select * from questions
+select * from evaluation_results
+select * from generated_content
+
+
+WITH joined AS (
+    SELECT 
+        q.domain,
+        q.subdomain,
+        q.question_type,
+        gt.relevancy_rating,
+        gt.accuracy_rating,
+        gt.completeness_rating,
+        COALESCE(
+            gt.overall_score,
+            (gt.relevancy_rating + gt.accuracy_rating + gt.completeness_rating)::numeric / 3.0
+        ) AS final_score
+    FROM public.questions q
+    LEFT JOIN public.ground_truth gt
+      ON gt.question_id = q.id   -- adjust if actual FK differs
+)
+SELECT 
+    COUNT(DISTINCT q.session_id) AS total_questions,
+    COUNT(gt.questionid)         AS total_qna,   -- answered questions
+    AVG(gt.relevancy_rating)::numeric    AS avg_relevancy,
+    AVG(gt.accuracy_rating)::numeric     AS avg_accuracy,
+    AVG(gt.completeness_rating)::numeric AS avg_completeness,
+    AVG(final_score)::numeric            AS avg_final_score
+FROM public.questions q
+LEFT JOIN public.ground_truth gt
+  ON gt.question_id = q.id;
+  
+  
+  
+  
+SELECT 
+    COUNT(DISTINCT q.id) AS total_questions,
+    COUNT(gt.question_id)       AS total_qna,
+    AVG(gt.relevancy_rating)    AS avg_relevancy,
+    AVG(gt.accuracy_rating)     AS avg_accuracy,
+    AVG(gt.completeness_rating) AS avg_completeness,
+    AVG(
+        COALESCE(
+            gt.overall_score,
+            (gt.relevancy_rating + gt.accuracy_rating + gt.completeness_rating) / 3.0
+        )
+    ) AS avg_final_score
+FROM questions q
+LEFT JOIN ground_truth gt
+  ON gt.question_id = q.id;
+
+
+WITH Joined AS (
+select q.domain,q.subdomain,gt.relevancy_rating,gt.accuracy_rating,gt.completeness_rating,
+COALESCE(
+            gt.overall_score,
+            (gt.relevancy_rating + gt.accuracy_rating + gt.completeness_rating) / 3.0
+        ) AS final_score
+ from questions AS q
+left join ground_truth AS gt
+ON gt.question_id = q.id
+)
+select count( distinct id) AS total_questions, count(question_id) AS Total_qna, 
+AVG(relevancy_rating)  AS avg_relevancy,     
+AVG(accuracy_rating)  AS avg_accuracy, AVG(completeness_rating) AS avg_completeness, AVG(final_score) AS final_score
+from Joined
+
+
+WITH extracted AS (
+    SELECT 
+        (evaluation_scores->>'component_a')::numeric AS comp_a,
+        (evaluation_scores->>'component_b')::numeric AS comp_b,
+        (evaluation_scores->>'component_c')::numeric AS comp_c,
+        (evaluation_scores->>'component_d')::numeric AS comp_d,
+        (evaluation_scores->>'aggregate')::numeric   AS agg
+    FROM public.generated_content
+    WHERE evaluation_scores IS NOT NULL
+)
+SELECT 'Component A: Quality Metrics' AS component, AVG(comp_a) AS avg_score FROM extracted
+UNION ALL
+SELECT 'Component B: Automated Metrics', AVG(comp_b) FROM extracted
+UNION ALL
+SELECT 'Component C: LLM-as-a-Judge', AVG(comp_c) FROM extracted
+UNION ALL
+SELECT 'Component D: Human Feedback', AVG(comp_d) FROM extracted
+UNION ALL
+SELECT 'Aggregate Score', AVG(agg) FROM extracted;
+
+
+
+
+
+
+
+
+
+ select *
+ FROM questions q
+  JOIN generated_content gc
+    ON q.session_id = gc.sessionid
+  JOIN evaluation_results er
+    ON q.session_id = er.question_id
+select *	
+FROM questions q
+  JOIN generated_content gc
+    ON q.session_id = gc.sessionid::uuid
+  JOIN evaluation_results er
+    ON q.session_id = er.question_id 
+	
+	5:15 to 6:08
+6:31 to 7:01
+7:15 to 7:41
+
+
+iceberg
